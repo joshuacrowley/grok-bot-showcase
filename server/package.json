@@ -1,0 +1,23 @@
+{
+  "name": "grok-bot-showcase-server",
+  "version": "1.0.0",
+  "description": "Worker serving the Grok Bot Showcase client and its JSON API",
+  "main": "index.ts",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build:client": "npm --prefix ../client run build",
+    "deploy": "npm run build:client && wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250828.1",
+    "typescript": "^5.9.2",
+    "wrangler": "^4.33.1"
+  },
+  "dependencies": {
+    "tinybase": "^6.7.5"
+  }
+}

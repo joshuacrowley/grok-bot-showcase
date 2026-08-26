@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card-bg: #ffffff;
+    --text: #1d1d1f;
+    --text-secondary: #6e6e73;
+    --border: #e5e5e7;
+    --accent-text: #4a6cf7;
+    --accent-image: #e85d75;
+    --accent-audio: #f59e0b;
+    --accent-video: #10b981;
+    --accent-pdf: #8b5cf6;
+    --radius: 12px;
+    --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  header h1 {
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+
+  .gear-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.4rem;
+    color: var(--text-secondary);
+    padding: 4px;
+    border-radius: 8px;
+    transition: background 0.15s;
+  }
+  .gear-btn:hover { background: var(--bg); }
+
+  .container {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 24px;
+    border-top: 3px solid var(--border);
+  }
+
+  .card[data-type="text"]  { border-top-color: var(--accent-text); }
+  .card[data-type="image"] { border-top-color: var(--accent-image); }
+  .card[data-type="audio"] { border-top-color: var(--accent-audio); }
+  .card[data-type="video"] { border-top-color: var(--accent-video); }
+  .card[data-type="pdf"]   { border-top-color: var(--accent-pdf); }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .card-icon {
+    font-size: 1.3rem;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  .card[data-type="text"] .card-icon  { background: #eef1fe; color: var(--accent-text); }
+  .card[data-type="image"] .card-icon { background: #fce8ec; color: var(--accent-image); }
+  .card[data-type="audio"] .card-icon { background: #fef3cd; color: var(--accent-audio); }
+  .card[data-type="video"] .card-icon { background: #d1fae5; color: var(--accent-video); }
+  .card[data-type="pdf"] .card-icon   { background: #ede9fe; color: var(--accent-pdf); }
+
+  .card-title { font-weight: 600; font-size: 1.05rem; }
+
+  textarea {
+    width: 100%;
+    min-height: 100px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  textarea:focus { border-color: var(--accent-text); }
+
+  .file-input-wrap {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+  .file-input-wrap:hover { border-color: var(--text-secondary); background: var(--bg); }
+  .file-input-wrap input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .file-input-wrap .label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .preview-area {
+    margin-top: 12px;
+  }
+  .preview-area img {
+    max-width: 100%;
+    max-height: 200px;
+    border-radius: 8px;
+  }
+  .preview-area audio { width: 100%; margin-top: 8px; }
+  .preview-area video {
+    width: 100%;
+    max-height: 240px;
+    border-radius: 8px;
+    background: #000;
+  }
+  .file-name {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-top: 8px;
+  }
+  .size-warning {
+    font-size: 0.85rem;
+    color: var(--accent-image);
+    margin-top: 4px;
+  }
+
+  .submit-btn {
+    margin-top: 16px;
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .card[data-type="text"] .submit-btn  { background: var(--accent-text); }
+  .card[data-type="image"] .submit-btn { background: var(--accent-image); }
+  .card[data-type="audio"] .submit-btn { background: var(--accent-audio); }
+  .card[data-type="video"] .submit-btn { background: var(--accent-video); }
+  .card[data-type="pdf"] .submit-btn   { background: var(--accent-pdf); }
+
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: none;
+  }
+  .submit-btn.loading .spinner { display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Audio recording */
+  .audio-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .record-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent-audio);
+    color: #fff;
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s;
+    position: relative;
+  }
+  .record-btn:active { transform: scale(0.95); }
+  .record-btn.recording {
+    background: #ef4444;
+    animation: pulse-ring 1.2s ease-out infinite;
+  }
+  @keyframes pulse-ring {
+    0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+    100% { box-shadow: 0 0 0 12px rgba(239,68,68,0); }
+  }
+  .record-status {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+  }
+  .record-status .timer {
+    font-variant-numeric: tabular-nums;
+    color: #ef4444;
+    font-weight: 600;
+  }
+
+  /* Video controls */
+  .video-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .video-controls button {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    font-family: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .video-controls button:hover { background: var(--bg); }
+  .video-controls button.active {
+    background: var(--accent-video);
+    color: #fff;
+    border-color: var(--accent-video);
+  }
+
+  /* Results */
+  .results {
+    margin-top: 16px;
+  }
+  .results-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .results-list li {
+    padding: 10px 14px;
+    background: var(--bg);
+    border-radius: 8px;
+    font-size: 0.93rem;
+  }
+  .results-list .item-name { font-weight: 600; }
+  .results-list .item-category {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-left: 8px;
+  }
+  .results-list .item-details {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  /* Settings modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 16px;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 28px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+  }
+  .modal h2 { font-size: 1.15rem; margin-bottom: 16px; }
+  .modal label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .modal input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    outline: none;
+  }
+  .modal input[type="text"]:focus { border-color: var(--accent-text); }
+  .modal .hint {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-top: 8px;
+  }
+  .modal .hint a { color: var(--accent-text); }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+  }
+  .modal-actions button {
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    transition: background 0.15s;
+  }
+  .modal-actions button:hover { background: var(--bg); }
+  .modal-actions .save-btn {
+    background: var(--accent-text);
+    color: #fff;
+    border-color: var(--accent-text);
+  }
+  .modal-actions .save-btn:hover { opacity: 0.9; background: var(--accent-text); }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--text);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    z-index: 200;
+    transition: transform 0.3s ease;
+    pointer-events: none;
+    max-width: 90vw;
+    text-align: center;
+  }
+  .toast.visible { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AI Demo</h1>
+  <button class="gear-btn" id="openSettings" aria-label="Settings">&#9881;</button>
+</header>
+
+<div class="container">
+
+  <!-- Text -->
+  <div class="card" data-type="text">
+    <div class="card-header">
+      <div class="card-icon">T</div>
+      <div class="card-title">Text</div>
+    </div>
+    <textarea id="textInput" placeholder="Paste or type text to extract items from..."></textarea>
+    <button class="submit-btn" id="textSubmit">Extract Items <span class="spinner"></span></button>
+    <div class="results" id="textResults"></div>
+  </div>
+
+  <!-- Image -->
+  <div class="card" data-type="image">
+    <div class="card-header">
+      <div class="card-icon">&#128247;</div>
+      <div class="card-title">Image</div>
+    </div>
+    <div class="file-input-wrap">
+      <input type="file" accept="image/*" capture="environment" id="imageInput">
+      <div class="label">Tap to take a photo or choose an image</div>
+    </div>
+    <div class="preview-area" id="imagePreview"></div>
+    <button class="submit-btn" id="imageSubmit" disabled>Extract Items <span class="spinner"></span></button>
+    <div class="results" id="imageResults"></div>
+  </div>
+
+  <!-- Audio -->
+  <div class="card" data-type="audio">
+    <div class="card-header">
+      <div class="card-icon">&#127908;</div>
+      <div class="card-title">Audio</div>
+    </div>
+    <div class="audio-controls">
+      <button class="record-btn" id="recordBtn" title="Record">&#9679;</button>
+      <div class="record-status" id="recordStatus">Tap to record</div>
+    </div>
+    <div class="preview-area" id="audioPreview"></div>
+    <button class="submit-btn" id="audioSubmit" disabled>Extract Items <span class="spinner"></span></button>
+    <div class="results" id="audioResults"></div>
+  </div>
+
+  <!-- Video -->
+  <div class="card" data-type="video">
+    <div class="card-header">
+      <div class="card-icon">&#127909;</div>
+      <div class="card-title">Video</div>
+    </div>
+    <div class="video-controls">
+      <button id="videoRecordBtn">Record Video</button>
+      <button id="videoStopBtn" style="display:none">Stop Recording</button>
+    </div>
+    <div class="file-input-wrap" style="margin-top:8px">
+      <input type="file" accept="video/*" id="videoFileInput">
+      <div class="label">Or upload a video file</div>
+    </div>
+    <div class="preview-area" id="videoPreview"></div>
+    <div class="size-warning" id="videoSizeWarning" style="display:none"></div>
+    <button class="submit-btn" id="videoSubmit" disabled>Extract Items <span class="spinner"></span></button>
+    <div class="results" id="videoResults"></div>
+  </div>
+
+  <!-- PDF -->
+  <div class="card" data-type="pdf">
+    <div class="card-header">
+      <div class="card-icon">&#128196;</div>
+      <div class="card-title">PDF</div>
+    </div>
+    <div class="file-input-wrap">
+      <input type="file" accept=".pdf,application/pdf" id="pdfInput">
+      <div class="label">Choose a PDF document</div>
+    </div>
+    <div class="file-name" id="pdfFileName"></div>
+    <button class="submit-btn" id="pdfSubmit" disabled>Extract Items <span class="spinner"></span></button>
+    <div class="results" id="pdfResults"></div>
+  </div>
+
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <h2>Settings</h2>
+    <label for="apiKeyInput">Gemini API Key</label>
+    <input type="text" id="apiKeyInput" placeholder="AIza...">
+    <div class="hint">Get a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a></div>
+    <div class="modal-actions">
+      <button id="cancelSettings">Cancel</button>
+      <button class="save-btn" id="saveSettings">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { GoogleGenAI } from 'https://esm.sh/@google/genai@1.30.0';
+
+const STORAGE_KEY = 'kitchen_sink_api_key';
+const MODEL = 'gemini-3.1-flash-lite';
+
+const listItemsSchema = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'The item' },
+          category: { type: 'string', description: 'A category' },
+          details: { type: 'string', description: 'Any extra details' }
+        },
+        required: ['name']
+      }
+    }
+  },
+  required: ['items']
+};
+
+// --- Utilities ---
+
+function getApiKey() {
+  return localStorage.getItem(STORAGE_KEY) || '';
+}
+
+function showToast(msg, duration = 3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('visible');
+  setTimeout(() => t.classList.remove('visible'), duration);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(',')[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+function renderResults(el, items) {
+  if (!items || items.length === 0) {
+    el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.9rem;margin-top:8px">No items found.</p>';
+    return;
+  }
+  const html = `<ul class="results-list">${items.map(item => `
+    <li>
+      <span class="item-name">${esc(item.name)}</span>
+      ${item.category ? `<span class="item-category">${esc(item.category)}</span>` : ''}
+      ${item.details ? `<div class="item-details">${esc(item.details)}</div>` : ''}
+    </li>`).join('')}</ul>`;
+  el.innerHTML = html;
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function setLoading(btn, loading) {
+  btn.disabled = loading;
+  btn.classList.toggle('loading', loading);
+}
+
+async function extractItems(parts, promptText, resultsEl, btn) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    showToast('Set your API key in Settings first');
+    return;
+  }
+  setLoading(btn, true);
+  resultsEl.innerHTML = '';
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: [{ role: 'user', parts: [{ text: promptText }, ...parts] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: listItemsSchema
+      }
+    });
+    const data = JSON.parse(response.text);
+    renderResults(resultsEl, data.items);
+    showToast(`Found ${data.items.length} item${data.items.length === 1 ? '' : 's'}`);
+  } catch (e) {
+    console.error(e);
+    showToast('Error: ' + (e.message || 'Something went wrong'));
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+// --- Settings ---
+
+const modal = document.getElementById('settingsModal');
+const apiKeyInput = document.getElementById('apiKeyInput');
+
+document.getElementById('openSettings').onclick = () => {
+  apiKeyInput.value = getApiKey();
+  modal.classList.add('visible');
+};
+document.getElementById('cancelSettings').onclick = () => modal.classList.remove('visible');
+document.getElementById('saveSettings').onclick = () => {
+  localStorage.setItem(STORAGE_KEY, apiKeyInput.value.trim());
+  modal.classList.remove('visible');
+  showToast('API key saved');
+};
+modal.onclick = (e) => { if (e.target === modal) modal.classList.remove('visible'); };
+
+// --- Text ---
+
+document.getElementById('textSubmit').onclick = () => {
+  const text = document.getElementById('textInput').value.trim();
+  if (!text) { showToast('Enter some text first'); return; }
+  extractItems([], 'Extract distinct items from this text:\n\n' + text,
+    document.getElementById('textResults'),
+    document.getElementById('textSubmit'));
+};
+
+// --- Image ---
+
+let imageFile = null;
+document.getElementById('imageInput').onchange = (e) => {
+  imageFile = e.target.files[0];
+  if (!imageFile) return;
+  const preview = document.getElementById('imagePreview');
+  preview.innerHTML = `<img src="${URL.createObjectURL(imageFile)}" alt="Preview">`;
+  document.getElementById('imageSubmit').disabled = false;
+};
+
+document.getElementById('imageSubmit').onclick = async () => {
+  if (!imageFile) return;
+  const base64 = await fileToBase64(imageFile);
+  extractItems(
+    [{ inlineData: { mimeType: imageFile.type, data: base64 } }],
+    'Identify and list all distinct items visible in this image',
+    document.getElementById('imageResults'),
+    document.getElementById('imageSubmit')
+  );
+};
+
+// --- Audio ---
+
+let audioBlob = null;
+let mediaRecorder = null;
+let recordingStart = 0;
+let timerInterval = null;
+
+const recordBtn = document.getElementById('recordBtn');
+const recordStatus = document.getElementById('recordStatus');
+
+recordBtn.onclick = async () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = [];
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      clearInterval(timerInterval);
+      recordBtn.classList.remove('recording');
+      recordBtn.innerHTML = '&#9679;';
+      recordStatus.textContent = 'Tap to record';
+      audioBlob = new Blob(chunks, { type: 'audio/webm' });
+      const preview = document.getElementById('audioPreview');
+      preview.innerHTML = `<audio controls src="${URL.createObjectURL(audioBlob)}"></audio>`;
+      document.getElementById('audioSubmit').disabled = false;
+    };
+    mediaRecorder.start();
+    recordBtn.classList.add('recording');
+    recordBtn.innerHTML = '&#9632;';
+    recordingStart = Date.now();
+    timerInterval = setInterval(() => {
+      const s = Math.floor((Date.now() - recordingStart) / 1000);
+      const mm = String(Math.floor(s / 60)).padStart(2, '0');
+      const ss = String(s % 60).padStart(2, '0');
+      recordStatus.innerHTML = `Recording <span class="timer">${mm}:${ss}</span>`;
+    }, 500);
+  } catch (e) {
+    showToast('Microphone access denied');
+  }
+};
+
+document.getElementById('audioSubmit').onclick = async () => {
+  if (!audioBlob) return;
+  const base64 = await fileToBase64(new File([audioBlob], 'audio.webm', { type: 'audio/webm' }));
+  extractItems(
+    [{ inlineData: { mimeType: 'audio/webm', data: base64 } }],
+    'Listen to this audio and extract all mentioned items',
+    document.getElementById('audioResults'),
+    document.getElementById('audioSubmit')
+  );
+};
+
+// --- Video ---
+
+let videoBlob = null;
+let videoRecorder = null;
+let videoStream = null;
+
+const videoPreview = document.getElementById('videoPreview');
+const videoRecordBtn = document.getElementById('videoRecordBtn');
+const videoStopBtn = document.getElementById('videoStopBtn');
+const videoSizeWarning = document.getElementById('videoSizeWarning');
+
+videoRecordBtn.onclick = async () => {
+  try {
+    videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    const videoEl = document.createElement('video');
+    videoEl.srcObject = videoStream;
+    videoEl.autoplay = true;
+    videoEl.muted = true;
+    videoEl.playsInline = true;
+    videoPreview.innerHTML = '';
+    videoPreview.appendChild(videoEl);
+
+    const chunks = [];
+    videoRecorder = new MediaRecorder(videoStream, { mimeType: 'video/webm' });
+    videoRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    videoRecorder.onstop = () => {
+      videoStream.getTracks().forEach(t => t.stop());
+      videoBlob = new Blob(chunks, { type: 'video/webm' });
+      showVideoPreview(videoBlob);
+      videoRecordBtn.style.display = '';
+      videoStopBtn.style.display = 'none';
+    };
+    videoRecorder.start();
+    videoRecordBtn.style.display = 'none';
+    videoStopBtn.style.display = '';
+  } catch (e) {
+    showToast('Camera access denied');
+  }
+};
+
+videoStopBtn.onclick = () => {
+  if (videoRecorder && videoRecorder.state === 'recording') videoRecorder.stop();
+};
+
+document.getElementById('videoFileInput').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  videoBlob = file;
+  showVideoPreview(file);
+};
+
+function showVideoPreview(blob) {
+  const url = URL.createObjectURL(blob);
+  videoPreview.innerHTML = `<video controls playsinline src="${url}"></video>`;
+  document.getElementById('videoSubmit').disabled = false;
+  const sizeMB = blob.size / (1024 * 1024);
+  if (sizeMB > 15) {
+    videoSizeWarning.textContent = `File is ${sizeMB.toFixed(1)} MB - may be too large for the API (>15 MB)`;
+    videoSizeWarning.style.display = '';
+  } else {
+    videoSizeWarning.style.display = 'none';
+  }
+}
+
+document.getElementById('videoSubmit').onclick = async () => {
+  if (!videoBlob) return;
+  const file = videoBlob instanceof File ? videoBlob : new File([videoBlob], 'video.webm', { type: 'video/webm' });
+  const base64 = await fileToBase64(file);
+  extractItems(
+    [{ inlineData: { mimeType: file.type || 'video/webm', data: base64 } }],
+    'Watch this video and extract all items mentioned or shown',
+    document.getElementById('videoResults'),
+    document.getElementById('videoSubmit')
+  );
+};
+
+// --- PDF ---
+
+let pdfFile = null;
+document.getElementById('pdfInput').onchange = (e) => {
+  pdfFile = e.target.files[0];
+  if (!pdfFile) return;
+  document.getElementById('pdfFileName').textContent = pdfFile.name;
+  document.getElementById('pdfSubmit').disabled = false;
+};
+
+document.getElementById('pdfSubmit').onclick = async () => {
+  if (!pdfFile) return;
+  const base64 = await fileToBase64(pdfFile);
+  extractItems(
+    [{ inlineData: { mimeType: 'application/pdf', data: base64 } }],
+    'Read this document and extract all items mentioned',
+    document.getElementById('pdfResults'),
+    document.getElementById('pdfSubmit')
+  );
+};
+</script>
+</body>
+</html>

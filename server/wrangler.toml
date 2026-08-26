@@ -1,0 +1,38 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "grok-bot-showcase"
+main = "index.ts"
+compatibility_date = "2025-10-11"
+account_id = "4eef749c08dc331e4641d1e19c208232"
+
+# Cloudflare provisions the DNS record and certificate for this.
+routes = [{ pattern = "grokbot.cursorsydney.com", custom_domain = true }]
+
+# Declaring a route turns the workers.dev URL off unless it is asked for, and
+# links already handed out point at it.
+workers_dev = true
+
+[dev]
+port = 53248
+
+# The Worker serves the built client, the sync socket and the login check from
+# one origin, so a bot browses and syncs against the same host.
+[assets]
+directory = "../client/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+# TinyBase sync server. One Durable Object holds the authoritative store and
+# persists it to its own SQLite storage.
+[[durable_objects.bindings]]
+name = "ShowcaseSync"
+class_name = "ShowcaseSync"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ShowcaseData"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ShowcaseSync"]
+deleted_classes = ["ShowcaseData"]
