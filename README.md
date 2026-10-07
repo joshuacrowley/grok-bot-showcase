@@ -58,6 +58,11 @@ neighbour, sometimes getting looked back at. The whole room turns to stare at a 
 arrival, nearest first, and at any bot being dragged. Bodies breathe, lean into their
 drift and squash when they hit the edge of frame.
 
+Names are hidden so long ones don't sprawl across the field. Every few seconds one bot
+hops and shows its name, and its neighbours turn to look; everyone gets a turn before
+anyone gets a second. Hovering a bot shows its name too. A QR code in the bottom-right
+corner goes straight to the add form, and the bots bounce off it rather than drift under.
+
 - **Click a bot** to bring up its name, owner and full description; click away, press
   escape, or wait twenty-four seconds and it returns to the field.
 - **Drag a bot** anywhere, and throw it if you like.

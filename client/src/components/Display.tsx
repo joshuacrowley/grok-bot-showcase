@@ -5,6 +5,7 @@ import { useBots, useSyncState } from '../lib/showcase';
 import { navigate } from '../lib/router';
 import { type LookSource } from '../lib/eyes';
 import { BotAvatar } from './BotAvatar';
+import { QrCode } from './QrCode';
 
 /**
  * Display mode: the showcase as something to leave running on a screen while
@@ -61,6 +62,21 @@ const BOUNCE_MS = 650;
 const BOUNCE_AMOUNT = 0.14;
 const BOUNCE_DECAY_S = 0.14;
 const BOUNCE_PERIOD_S = 0.3;
+/**
+ * Names stay hidden, since long ones sprawl across the field. Instead the bots
+ * take turns: one hops and shows its name, and its neighbours turn to look.
+ * Everyone gets a turn before anyone gets a second.
+ */
+const NAME_EVERY_MS = 2_600;
+const NAME_SHOW_MS = 4_800;
+const HOP_MS = 560;
+/** Hop height, as a fraction of the bot's size. */
+const HOP_HEIGHT = 0.28;
+const HOP_NOTICE_MS = 2_800;
+const HOP_NOTICE_PX = 320;
+/** Where the QR code sends people. The display may be served from another origin. */
+const ADD_URL = 'https://grokbot.cursorsydney.com/submit';
+const QR_SIZE = 132;
 
 interface Node {
   bot: Bot;
@@ -82,6 +98,9 @@ interface Node {
   glanceAt: string | null;
   glanceUntil: number;
   glanceCooldown: number;
+  hopAt: number;
+  landed: boolean;
+  nameUntil: number;
 }
 
 interface Event {
@@ -126,7 +145,7 @@ function scatter(index: number, count: number, bounds: Bounds, jitter: number): 
   ];
 }
 
-/** Footprint, including the name sitting under the avatar. */
+/** Footprint, with a little breathing room. Names are hidden most of the time, so they do not count. */
 function radiusFor(size: number): number {
   return size / 2 + 10;
 }
@@ -183,15 +202,71 @@ function bodyTransform(node: Node, now: number, dt: number): string {
     }
   }
 
+  let lift = 0;
+  const hop = (now - node.hopAt) / HOP_MS;
+  if (hop >= 0 && hop < 1) {
+    const arc = Math.sin(Math.PI * hop);
+    lift = arc * node.size * HOP_HEIGHT;
+    sy *= 1 + arc * 0.08;
+    sx *= 1 - arc * 0.05;
+  } else if (hop >= 1 && !node.landed) {
+    node.landed = true;
+    node.bounceAt = now;
+    node.bounceAxis = 'y';
+  }
+
   const lean = Math.max(-LEAN_MAX_DEG, Math.min(node.vx * LEAN_DEG_PER_SPEED, LEAN_MAX_DEG));
   node.lean += (lean - node.lean) * (1 - Math.exp(-dt / LEAN_TAU_S));
 
-  return `rotate(${node.lean.toFixed(2)}deg) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
+  return (
+    `translateY(${(-lift).toFixed(1)}px) rotate(${node.lean.toFixed(2)}deg) ` +
+    `scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`
+  );
+}
+
+/** Picks the next bot to hop and show its name, cycling through a shuffled order. */
+function callOnStage(nodes: Map<string, Node>, queue: string[], now: number): void {
+  for (let attempts = 0; attempts < 2; attempts += 1) {
+    if (queue.length === 0) {
+      queue.push(...[...nodes.keys()].sort(() => Math.random() - 0.5));
+    }
+    while (queue.length > 0) {
+      const node = nodes.get(queue.pop()!);
+      if (!node) continue;
+      node.hopAt = now;
+      node.landed = false;
+      node.nameUntil = now + NAME_SHOW_MS;
+      return;
+    }
+  }
+}
+
+/** Pushes a bot out of a screen-space rectangle it is not allowed to drift under. */
+function avoidRect(node: Node, rect: Bounds, radius: number, now: number): void {
+  const minX = rect.minX - radius;
+  const maxX = rect.maxX + radius;
+  const minY = rect.minY - radius;
+  const maxY = rect.maxY + radius;
+  if (node.x <= minX || node.x >= maxX || node.y <= minY || node.y >= maxY) return;
+
+  const exits = [node.x - minX, maxX - node.x, node.y - minY, maxY - node.y];
+  const side = exits.indexOf(Math.min(...exits));
+  if (side < 2) {
+    node.x = side === 0 ? minX : maxX;
+    node.vx = Math.abs(node.vx) * (side === 0 ? -1 : 1);
+    node.bounceAxis = 'x';
+  } else {
+    node.y = side === 2 ? minY : maxY;
+    node.vy = Math.abs(node.vy) * (side === 2 ? -1 : 1);
+    node.bounceAxis = 'y';
+  }
+  node.bounceAt = now;
 }
 
 /**
  * What each bot is looking at, most interesting first: a bot being dragged, then
- * a new arrival, then whoever it just bumped into. Otherwise it is left to the
+ * a new arrival, then a neighbour showing its name, then whoever it just bumped
+ * into. Otherwise it is left to the
  * shared eye loop, which follows the pointer or has the bots look at each other.
  */
 function steerGazes(nodes: Node[], draggingId: string | undefined, now: number): void {
@@ -199,8 +274,10 @@ function steerGazes(nodes: Node[], draggingId: string | undefined, now: number):
   const dragged = draggingId ? byId.get(draggingId) : undefined;
 
   let newest: Node | undefined;
+  let hopper: Node | undefined;
   for (const node of nodes) {
     if (now - node.born < ARRIVAL_STARE_MS && (!newest || node.born > newest.born)) newest = node;
+    if (now - node.hopAt < HOP_NOTICE_MS && (!hopper || node.hopAt > hopper.hopAt)) hopper = node;
   }
 
   for (const node of nodes) {
@@ -213,6 +290,11 @@ function steerGazes(nodes: Node[], draggingId: string | undefined, now: number):
         if (now - node.born < ARRIVAL_HELLO_MS) target = node;
       } else if (now - newest.born > ripple) {
         target = newest;
+      }
+    }
+    if (!target && hopper) {
+      if (node === hopper || Math.hypot(node.x - hopper.x, node.y - hopper.y) < HOP_NOTICE_PX) {
+        target = hopper;
       }
     }
     if (!target && node.glanceAt && now < node.glanceUntil) {
@@ -237,6 +319,8 @@ export const Display: React.FC = () => {
   const seenRef = useRef<Map<string, Bot> | null>(null);
   const focusedIdRef = useRef<string | null>(null);
   focusedIdRef.current = focusedId;
+  const qrRef = useRef<HTMLDivElement>(null);
+  const qrRectRef = useRef<Bounds | null>(null);
 
   const byId = useMemo(() => new Map(bots.map((bot) => [bot.id, bot])), [bots]);
   const focused = focusedId ? (byId.get(focusedId) ?? null) : null;
@@ -297,6 +381,9 @@ export const Display: React.FC = () => {
         glanceAt: null,
         glanceUntil: 0,
         glanceCooldown: 0,
+        hopAt: Number.NEGATIVE_INFINITY,
+        landed: true,
+        nameUntil: 0,
       });
       changed = true;
     });
@@ -364,7 +451,14 @@ export const Display: React.FC = () => {
       for (const node of nodesRef.current.values()) {
         node.size = sizeFor(node.bot, vw, vh);
       }
+      // Measured here rather than per frame: it only moves when the window does.
+      const box = qrRef.current?.getBoundingClientRect();
+      qrRectRef.current =
+        box && box.width > 0
+          ? { minX: box.left, maxX: box.right, minY: box.top, maxY: box.bottom }
+          : null;
     };
+    onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
@@ -375,6 +469,8 @@ export const Display: React.FC = () => {
     const still = prefersReducedMotion();
     let raf = 0;
     let last = performance.now();
+    let nextNameAt = last + NAME_EVERY_MS;
+    const nameQueue: string[] = [];
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
@@ -394,6 +490,19 @@ export const Display: React.FC = () => {
       const dimmed = focusedIdRef.current !== null;
       const dragging = dragRef.current?.id;
       const nodes = [...nodesRef.current.values()];
+
+      if (now >= nextNameAt && nodes.length > 0) {
+        callOnStage(nodesRef.current, nameQueue, now);
+        nextNameAt = now + NAME_EVERY_MS * (0.8 + Math.random() * 0.4);
+      }
+
+      const qr = qrRectRef.current;
+      const qrWorld: Bounds | null = qr && {
+        minX: qr.minX - vw / 2 + cam.x,
+        maxX: qr.maxX - vw / 2 + cam.x,
+        minY: qr.minY - vh / 2 + cam.y,
+        maxY: qr.maxY - vh / 2 + cam.y,
+      };
 
       // Nudge overlapping bots apart, so a crowd spreads out instead of piling
       // up where the newest arrivals land.
@@ -461,6 +570,7 @@ export const Display: React.FC = () => {
             node.vy = Math.abs(node.vy) * (node.y < minY ? 1 : -1);
             node.y = Math.max(minY, Math.min(maxY, node.y));
           }
+          if (qrWorld) avoidRect(node, qrWorld, radius, now);
         }
 
         if (!still && node.bodyEl) {
@@ -480,6 +590,10 @@ export const Display: React.FC = () => {
           `translate(-50%, -50%) scale(${pop.toFixed(3)})`;
         el.style.opacity = dimmed && focusedIdRef.current !== node.bot.id ? '0.18' : '1';
         el.classList.toggle('is-new', age < NEW_MS);
+        el.classList.toggle(
+          'is-named',
+          now < node.nameUntil || age < NEW_MS || node.bot.id === dragging,
+        );
       }
 
       steerGazes(nodes, dragging, now);
@@ -606,13 +720,15 @@ export const Display: React.FC = () => {
                 live
               />
             </span>
-            <span className="display-bot-name">{node.bot.name}</span>
-            {node.bot.upvotes > 0 && (
-              <span className="display-bot-votes">
-                <ArrowUp size={11} />
-                {node.bot.upvotes}
-              </span>
-            )}
+            <span className="display-bot-label">
+              <span className="display-bot-name">{node.bot.name}</span>
+              {node.bot.upvotes > 0 && (
+                <span className="display-bot-votes">
+                  <ArrowUp size={11} />
+                  {node.bot.upvotes}
+                </span>
+              )}
+            </span>
           </div>
         ))}
       </div>
@@ -699,6 +815,11 @@ export const Display: React.FC = () => {
             <strong>{totals.questions}</strong> questions
           </span>
         </div>
+      </div>
+
+      <div className="display-qr" ref={qrRef}>
+        <QrCode value={ADD_URL} size={QR_SIZE} className="display-qr-code" />
+        <span>Scan to add your bot</span>
       </div>
 
       <button type="button" className="display-exit" onClick={() => navigate('/')}>

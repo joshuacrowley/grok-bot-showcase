@@ -1241,13 +1241,46 @@ body {
   100% { opacity: 0; transform: translate(-50%, -50%) scale(2.1); }
 }
 
+.display-bot.is-named,
+.display-bot:hover {
+  z-index: 2;
+}
+
+/* Hidden until the bot's turn, so long names never pile up across the field. */
+.display-bot-label {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(16, 16, 18, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -6px) scale(0.86);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.display-bot.is-named .display-bot-label,
+.display-bot:hover .display-bot-label {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+  transition: opacity 180ms ease, transform 420ms cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+
 .display-bot-name {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 15px;
   font-weight: 500;
   letter-spacing: 0.01em;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255, 255, 255, 0.92);
   white-space: nowrap;
-  pointer-events: none;
 }
 
 .display-bot-votes {
@@ -1255,8 +1288,30 @@ body {
   align-items: center;
   gap: 2px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.display-qr {
+  position: absolute;
+  right: 24px;
+  bottom: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 10px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.8);
   pointer-events: none;
+}
+
+.display-qr-code {
+  display: block;
+  border-radius: 10px;
 }
 
 .display-empty {
@@ -1454,6 +1509,10 @@ body {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
+  }
+  /* Nobody scans a phone with a phone. */
+  .display-qr {
+    display: none;
   }
 }
 
