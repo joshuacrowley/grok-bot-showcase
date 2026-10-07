@@ -969,7 +969,7 @@ body {
 /* Four across, two rows — the same arrangement as the Grok Bot avatar picker. */
 .shape-options {
   display: grid;
-  grid-template-columns: repeat(4, 52px);
+  grid-template-columns: repeat(5, 52px);
   gap: 6px;
 }
 
@@ -1215,6 +1215,9 @@ body {
   position: relative;
   display: inline-flex;
   line-height: 0;
+  /* Low, so breathing and squash read as the bot settling onto its feet. */
+  transform-origin: 50% 70%;
+  will-change: transform;
 }
 
 /* A ring so a bot arriving mid-event catches the room's eye. */

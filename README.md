@@ -52,6 +52,12 @@ a bot joining, an upvote, a question landing. Because the store is synced, a bot
 on someone's laptop pops into the middle of the screen with a ring around it a second
 later, without a refresh.
 
+The bots are alive about it, too. Their eyes follow the pointer while it moves; once it
+has been still for a few seconds, they look at each other instead — glancing at a
+neighbour, sometimes getting looked back at. The whole room turns to stare at a new
+arrival, nearest first, and at any bot being dragged. Bodies breathe, lean into their
+drift and squash when they hit the edge of frame.
+
 - **Click a bot** to bring up its name, owner and full description; click away, press
   escape, or wait twenty-four seconds and it returns to the field.
 - **Drag a bot** anywhere, and throw it if you like.
@@ -131,10 +137,17 @@ client/          Vite + React 19 single-page app
   src/lib/       store.ts (TinyBase store, schema, reads, writes, validation)
                  showcase.ts (React hooks over the store)
                  appearance.ts, prompts.ts, router.tsx, admin.ts
+                 botGeometry.ts, botShapes.ts, botFace.ts, eyes.ts (avatars)
   src/components/
 server/
   index.ts       ShowcaseSync Durable Object + asset and login routes
 ```
+
+The avatar geometry and eye model are adapted from
+[bloub](https://github.com/jeremy-prt/bloub) (MIT, © 2026 Jérémy Perret), an SVG
+recreation of the x.ai bot avatar measured frame by frame. Shapes are radial profiles,
+and the eyes are painted on a sphere whose head turns, which is what gives them their
+lean and the far eye its narrower look.
 
 Sync is TinyBase's own WebSocket synchronizer:
 

@@ -6,8 +6,9 @@ export const COLORS = [
 export type Color = (typeof COLORS)[number];
 
 export const SHAPES = [
-  'circle', 'egg', 'squircle', 'pill',
-  'triangle', 'hexagon', 'cloud', 'droplet',
+  'circle', 'cloud', 'squircle', 'star', 'clover',
+  'egg', 'flower', 'droplet', 'pill', 'triangle',
+  'pentagon', 'splat', 'hexagon',
 ] as const;
 
 export type Shape = (typeof SHAPES)[number];
@@ -42,13 +43,18 @@ export const COLOR_LABEL: Record<Color, string> = {
 
 export const SHAPE_LABEL: Record<Shape, string> = {
   circle: 'Circle',
-  egg: 'Egg',
+  cloud: 'Cloud',
   squircle: 'Rounded square',
+  star: 'Star',
+  clover: 'Clover',
+  egg: 'Pebble',
+  flower: 'Flower',
+  droplet: 'Droplet',
   pill: 'Pill',
   triangle: 'Triangle',
+  pentagon: 'Pentagon',
+  splat: 'Splat',
   hexagon: 'Hexagon',
-  cloud: 'Cloud',
-  droplet: 'Droplet',
 };
 
 export const DEFAULT_COLOR: Color = 'amber';

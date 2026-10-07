@@ -3,6 +3,7 @@ import { ArrowUp, MessageCircleQuestion, Sparkles, X } from 'lucide-react';
 import { type Bot } from '../lib/store';
 import { useBots, useSyncState } from '../lib/showcase';
 import { navigate } from '../lib/router';
+import { type LookSource } from '../lib/eyes';
 import { BotAvatar } from './BotAvatar';
 
 /**
@@ -42,6 +43,25 @@ const FOCUS_AUTO_RETURN_MS = 24_000;
 const TICKER_MAX = 3;
 const TICKER_KEEP_MS = 45_000;
 
+/** Everyone turns to look at a new arrival, the nearest first, like a ripple through the room. */
+const ARRIVAL_STARE_MS = 4_200;
+const ARRIVAL_RIPPLE_MS_PER_PX = 0.7;
+/** The newcomer itself looks out at the room for a moment before joining in. */
+const ARRIVAL_HELLO_MS = 1_600;
+/** Two bots that drift into each other exchange a look, but not every time they touch. */
+const GLANCE_MS = 1_700;
+const GLANCE_COOLDOWN_MS = 9_000;
+const BREATH_PERIOD_MS = 3_400;
+const BREATH = 0.02;
+const LEAN_DEG_PER_SPEED = 0.35;
+const LEAN_MAX_DEG = 9;
+const LEAN_TAU_S = 0.3;
+/** Squash on hitting the edge of frame: a damped wobble. */
+const BOUNCE_MS = 650;
+const BOUNCE_AMOUNT = 0.14;
+const BOUNCE_DECAY_S = 0.14;
+const BOUNCE_PERIOD_S = 0.3;
+
 interface Node {
   bot: Bot;
   x: number;
@@ -51,6 +71,17 @@ interface Node {
   size: number;
   born: number;
   el: HTMLDivElement | null;
+  bodyEl: HTMLSpanElement | null;
+  svgEl: SVGSVGElement | null;
+  /** Steers this bot's eyes; stable for the node's lifetime, as BotAvatar requires. */
+  look: LookSource;
+  phase: number;
+  lean: number;
+  bounceAt: number;
+  bounceAxis: 'x' | 'y';
+  glanceAt: string | null;
+  glanceUntil: number;
+  glanceCooldown: number;
 }
 
 interface Event {
@@ -128,6 +159,70 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 }
 
+/**
+ * The body's own motion, under the drift: a slow breath, a lean into the
+ * direction of travel, and a wobble when it hits the edge of frame.
+ * `dt` is in seconds.
+ */
+function bodyTransform(node: Node, now: number, dt: number): string {
+  const breath = Math.sin((now / BREATH_PERIOD_MS) * Math.PI * 2 + node.phase);
+  let sx = 1 - breath * BREATH * 0.7;
+  let sy = 1 + breath * BREATH;
+
+  const since = now - node.bounceAt;
+  if (since < BOUNCE_MS) {
+    const s = since / 1000;
+    const wobble =
+      BOUNCE_AMOUNT * Math.exp(-s / BOUNCE_DECAY_S) * Math.cos((s / BOUNCE_PERIOD_S) * Math.PI * 2);
+    if (node.bounceAxis === 'x') {
+      sx *= 1 - wobble;
+      sy *= 1 + wobble * 0.7;
+    } else {
+      sy *= 1 - wobble;
+      sx *= 1 + wobble * 0.7;
+    }
+  }
+
+  const lean = Math.max(-LEAN_MAX_DEG, Math.min(node.vx * LEAN_DEG_PER_SPEED, LEAN_MAX_DEG));
+  node.lean += (lean - node.lean) * (1 - Math.exp(-dt / LEAN_TAU_S));
+
+  return `rotate(${node.lean.toFixed(2)}deg) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
+}
+
+/**
+ * What each bot is looking at, most interesting first: a bot being dragged, then
+ * a new arrival, then whoever it just bumped into. Otherwise it is left to the
+ * shared eye loop, which follows the pointer or has the bots look at each other.
+ */
+function steerGazes(nodes: Node[], draggingId: string | undefined, now: number): void {
+  const byId = new Map(nodes.map((node) => [node.bot.id, node]));
+  const dragged = draggingId ? byId.get(draggingId) : undefined;
+
+  let newest: Node | undefined;
+  for (const node of nodes) {
+    if (now - node.born < ARRIVAL_STARE_MS && (!newest || node.born > newest.born)) newest = node;
+  }
+
+  for (const node of nodes) {
+    let target: Node | undefined;
+    if (dragged) {
+      target = dragged;
+    } else if (newest) {
+      const ripple = Math.hypot(node.x - newest.x, node.y - newest.y) * ARRIVAL_RIPPLE_MS_PER_PX;
+      if (node === newest) {
+        if (now - node.born < ARRIVAL_HELLO_MS) target = node;
+      } else if (now - newest.born > ripple) {
+        target = newest;
+      }
+    }
+    if (!target && node.glanceAt && now < node.glanceUntil) {
+      target = byId.get(node.glanceAt);
+    }
+    // Looking at itself is looking straight out, at the room.
+    node.look.current = target?.svgEl ?? null;
+  }
+}
+
 export const Display: React.FC = () => {
   const { bots } = useBots();
   const syncState = useSyncState();
@@ -192,6 +287,16 @@ export const Display: React.FC = () => {
         // is still small moments after load, so the whole field would look new.
         born: first ? ALREADY_HERE : performance.now(),
         el: null,
+        bodyEl: null,
+        svgEl: null,
+        look: { current: null },
+        phase: hash01(bot.id, 5) * Math.PI * 2,
+        lean: 0,
+        bounceAt: Number.NEGATIVE_INFINITY,
+        bounceAxis: 'x',
+        glanceAt: null,
+        glanceUntil: 0,
+        glanceCooldown: 0,
       });
       changed = true;
     });
@@ -303,6 +408,15 @@ export const Display: React.FC = () => {
             const distance = Math.hypot(dx, dy);
             if (distance >= reach) continue;
 
+            if (now > a.glanceCooldown && now > b.glanceCooldown) {
+              a.glanceAt = b.bot.id;
+              b.glanceAt = a.bot.id;
+              a.glanceUntil = now + GLANCE_MS;
+              b.glanceUntil = now + GLANCE_MS + 300;
+              a.glanceCooldown = now + GLANCE_COOLDOWN_MS * (0.7 + hash01(a.bot.id, 6) * 0.6);
+              b.glanceCooldown = now + GLANCE_COOLDOWN_MS * (0.7 + hash01(b.bot.id, 6) * 0.6);
+            }
+
             // Perfectly coincident bots need an arbitrary direction to escape on.
             const ux = distance > 0.01 ? dx / distance : Math.cos(i * 2.4);
             const uy = distance > 0.01 ? dy / distance : Math.sin(i * 2.4);
@@ -332,13 +446,25 @@ export const Display: React.FC = () => {
           const minY = bounds.minY + radius;
           const maxY = bounds.maxY - radius;
           if (node.x < minX || node.x > maxX) {
+            if ((node.x < minX && node.vx < 0) || (node.x > maxX && node.vx > 0)) {
+              node.bounceAt = now;
+              node.bounceAxis = 'x';
+            }
             node.vx = Math.abs(node.vx) * (node.x < minX ? 1 : -1);
             node.x = Math.max(minX, Math.min(maxX, node.x));
           }
           if (node.y < minY || node.y > maxY) {
+            if ((node.y < minY && node.vy < 0) || (node.y > maxY && node.vy > 0)) {
+              node.bounceAt = now;
+              node.bounceAxis = 'y';
+            }
             node.vy = Math.abs(node.vy) * (node.y < minY ? 1 : -1);
             node.y = Math.max(minY, Math.min(maxY, node.y));
           }
+        }
+
+        if (!still && node.bodyEl) {
+          node.bodyEl.style.transform = bodyTransform(node, now, dt);
         }
 
         const el = node.el;
@@ -355,6 +481,8 @@ export const Display: React.FC = () => {
         el.style.opacity = dimmed && focusedIdRef.current !== node.bot.id ? '0.18' : '1';
         el.classList.toggle('is-new', age < NEW_MS);
       }
+
+      steerGazes(nodes, dragging, now);
     };
 
     raf = requestAnimationFrame(frame);
@@ -461,8 +589,22 @@ export const Display: React.FC = () => {
             tabIndex={-1}
             aria-label={node.bot.name}
           >
-            <span className="display-bot-body">
-              <BotAvatar color={node.bot.color} shape={node.bot.shape} size={node.size} />
+            <span
+              className="display-bot-body"
+              ref={(el) => {
+                const current = nodesRef.current.get(node.bot.id);
+                if (!current) return;
+                current.bodyEl = el;
+                current.svgEl = el?.querySelector('svg') ?? null;
+              }}
+            >
+              <BotAvatar
+                color={node.bot.color}
+                shape={node.bot.shape}
+                size={node.size}
+                lookAt={node.look}
+                live
+              />
             </span>
             <span className="display-bot-name">{node.bot.name}</span>
             {node.bot.upvotes > 0 && (

@@ -1,87 +1,109 @@
+import { type Profile } from './botGeometry';
+import { REST_GAZE, eyeFrames } from './botFace';
+
 /**
- * Shared eye animation for every bot avatar on the page: look-tracking, blinks
- * and a slow idle drift.
+ * Shared eye animation for every bot avatar on the page.
  *
- * Timings and curves follow the creature.company eye behaviour. The difference
- * here is that these bots have no pupils — the white slits are the whole eye, so
- * they take the travel a pupil would normally get, scaled down to stay inside
- * the body.
+ * Each bot has a head pose (see `botFace.ts`) that turns toward whatever it is
+ * looking at. While the pointer moves, that is the pointer. Once it has been
+ * still for a few seconds — or on a display nobody touches — the bots get
+ * social: each picks a nearby bot to look at for a few seconds, sometimes gets
+ * looked back at, and now and then just gazes off in its resting pose.
+ *
+ * A caller can also steer a bot directly with a `LookSource`, which is how
+ * display mode makes the whole room turn toward a new arrival.
  *
  * One requestAnimationFrame loop drives every registered avatar and writes SVG
  * transforms directly. Doing this through React state would re-render the whole
  * grid sixty times a second.
  */
 
-const VIEWBOX = 64;
+export interface LookPoint {
+  x: number;
+  y: number;
+}
 
-// Straight from the reference behaviour.
-const LOOK_MAX_MAG = 0.75;
-const LOOK_SMOOTH_MIN_MS = 100;
-const LOOK_SMOOTH_MAX_MS = 250;
-const LOOK_INTRO_MS = 600;
-const BLINK_INTERVAL: [number, number] = [3000, 6000];
-const BLINK_CLOSE_MS = 250;
-const BLINK_OPEN_MS = 200;
+/** A viewport point, or an element — another avatar's `<svg>` tracks it as it moves. */
+export type LookTarget = LookPoint | Element;
 
-/** How far the slits travel, in viewBox units. Tuned to stay inside every shape. */
-const LOOK_X = 5;
-const LOOK_Y = 3.6;
+/** Read every frame, so gaze can be steered without re-rendering. `null` is the default behaviour. */
+export interface LookSource {
+  current: LookTarget | null;
+}
+
+/** Head turn at full reach, in degrees. Wider than bloub's, which draws one large bot. */
+const YAW_MAX = 30;
+const PITCH_MAX = 24;
+/** Looking at something level holds the head slightly up, which reads as attentive. */
+const LOOK_PITCH = 8;
+
+/** Turn speed varies per bot, so a grid of them does not move as one object. */
+const TURN_TAU_MS: [number, number] = [90, 200];
+/** Blending between the resting pose and a target is slower than turning between targets. */
+const MIX_TAU_MS = 260;
 
 /**
- * Distance at which an eye is looking as hard as it can, in pixels.
- *
- * A deliberate departure from the reference, which ramps over half the viewport
- * because it draws one huge pair of eyes in the middle of the screen. These
- * avatars are small and scattered, so that ramp made an avatar near the left
- * edge barely look left while permanently straining right. Saturating a few
- * avatar-widths out means every bot points at the cursor, while still easing to
- * centre when the cursor is right on top of one.
+ * Distance at which a bot is looking as hard as it can, scaled by its size. A
+ * fixed reach made small avatars barely react to a neighbour beside them.
  */
-const LOOK_REACH_PX = 240;
-const IDLE_X = 0.45;
-const IDLE_Y = 0.3;
+const REACH_PER_SIZE = 2.4;
+const REACH_PX: [number, number] = [110, 260];
 
-/** How closed a blink gets. The reference bottoms out at 0.18 with a pupil to hide. */
-const BLINK_MIN_SCALE = 0.14;
+/** How long the pointer must be still before bots start looking at each other. */
+const SOCIAL_AFTER_MS = 3_500;
+/** Extra per-bot delay, so the room drifts into it rather than switching at once. */
+const SOCIAL_STAGGER_MS = 1_800;
+const SOCIAL_RANGE_PX = 560;
+const FOCUS_HOLD_MS: [number, number] = [1_800, 5_200];
+const REST_HOLD_MS: [number, number] = [1_400, 3_400];
+const REST_CHANCE = 0.25;
+const RECIPROCATE_CHANCE = 0.5;
+const BLINK_ON_SWITCH_CHANCE = 0.35;
 
-/** Second smoothing stage, on top of the per-eye cursor lag. */
-const BLEND_TAU_MS = 40;
+const BLINK_INTERVAL_MS: [number, number] = [2_600, 6_000];
+const BLINK_MS = 200;
+const DOUBLE_BLINK_CHANCE = 0.18;
+const DOUBLE_BLINK_GAP_MS = 70;
 
-/** Avatars only move when the page scrolls or relayouts, so polling is enough. */
+/** Avatars only move when the page scrolls or relayouts, so polling is enough unless `live`. */
 const RECT_REFRESH_MS = 250;
 
 interface Instance {
-  eyes: SVGGraphicsElement;
+  eyes: [SVGGraphicsElement, SVGGraphicsElement];
   svg: SVGSVGElement;
-  /** Eye centre in viewBox units, which differs per shape. */
-  cx: number;
-  cy: number;
-  screenX: number;
-  screenY: number;
+  profile: Profile;
+  scale: number;
+  lookAt: LookSource | null;
+  live: boolean;
+  x: number;
+  y: number;
+  size: number;
   measured: boolean;
-  tau: number;
-  cursorX: number;
-  cursorY: number;
-  tracking: boolean;
-  offX: number;
-  offY: number;
+  turnTau: number;
+  yaw: number;
+  pitch: number;
+  mix: number;
   blinkT: number;
   nextBlink: number;
-  idlePhase: number;
+  doubleBlink: boolean;
+  phase: number;
+  socialDelay: number;
+  focus: Instance | null;
+  focusUntil: number;
 }
 
 const instances = new Set<Instance>();
+const bySvg = new Map<Element, Instance>();
 
 let rafId = 0;
 let lastNow = 0;
 let rectAge = Number.POSITIVE_INFINITY;
-let cursorX = 0;
-let cursorY = 0;
-let cursorSeen = false;
-let introT = 0;
+let pointerX = 0;
+let pointerY = 0;
+let pointerAt = Number.NEGATIVE_INFINITY;
 let listening = false;
 
-function randBetween(a: number, b: number): number {
+function randBetween([a, b]: [number, number]): number {
   return a + Math.random() * (b - a);
 }
 
@@ -89,44 +111,198 @@ function smoothstep(t: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 }
 
 /** Closes fast and opens slightly slower, which is what reads as a blink. */
-function blinkScaleY(blinkT: number): number {
-  if (blinkT < 0) return 1;
-  const total = BLINK_CLOSE_MS + BLINK_OPEN_MS;
-  if (blinkT >= total) return 1;
-
-  const range = 1 - BLINK_MIN_SCALE;
-  if (blinkT < BLINK_CLOSE_MS) {
-    return 1 - range * smoothstep(blinkT / BLINK_CLOSE_MS);
-  }
-  return BLINK_MIN_SCALE + range * smoothstep((blinkT - BLINK_CLOSE_MS) / BLINK_OPEN_MS);
+function lidFor(blinkT: number): number {
+  if (blinkT < 0 || blinkT >= BLINK_MS) return 1;
+  const k = blinkT / BLINK_MS;
+  return k < 0.45 ? 1 - k / 0.45 : (k - 0.45) / 0.55;
 }
 
 function measure(instance: Instance): void {
-  // Measured from the untransformed <svg>, not the eye group. Measuring the
-  // group would read back the offset we just wrote and drift.
+  // The <svg> itself, never the eye paths: those carry the transform we write.
   const box = instance.svg.getBoundingClientRect();
   if (box.width === 0) {
     instance.measured = false;
     return;
   }
-  instance.screenX = box.x + (instance.cx / VIEWBOX) * box.width;
-  instance.screenY = box.y + (instance.cy / VIEWBOX) * box.height;
+  instance.x = box.x + box.width / 2;
+  instance.y = box.y + box.height / 2;
+  instance.size = box.width;
   instance.measured = true;
 }
 
+function onScreen(instance: Instance): boolean {
+  const margin = instance.size;
+  return (
+    instance.x > -margin &&
+    instance.y > -margin &&
+    instance.x < window.innerWidth + margin &&
+    instance.y < window.innerHeight + margin
+  );
+}
+
+function startBlink(instance: Instance): void {
+  if (instance.blinkT < 0) instance.blinkT = 0;
+}
+
+function advanceBlink(instance: Instance, dt: number): void {
+  if (instance.blinkT >= 0) {
+    instance.blinkT += dt;
+    if (instance.blinkT < BLINK_MS) return;
+    instance.blinkT = -1;
+    if (instance.doubleBlink) {
+      instance.doubleBlink = false;
+      instance.nextBlink = DOUBLE_BLINK_GAP_MS;
+    } else {
+      instance.doubleBlink = Math.random() < DOUBLE_BLINK_CHANCE;
+      instance.nextBlink = randBetween(BLINK_INTERVAL_MS);
+    }
+    return;
+  }
+  instance.nextBlink -= dt;
+  if (instance.nextBlink <= 0) instance.blinkT = 0;
+}
+
+/** Nearer bots are likelier picks; sometimes none, so the room is not all staring. */
+function chooseFocus(instance: Instance, now: number): void {
+  const previous = instance.focus;
+  const candidates: Array<[Instance, number]> = [];
+  let total = 0;
+  for (const other of instances) {
+    if (other === instance || !other.measured || !onScreen(other)) continue;
+    const distance = Math.hypot(other.x - instance.x, other.y - instance.y);
+    if (distance < 1 || distance > SOCIAL_RANGE_PX) continue;
+    const weight = 1 / (distance + 60);
+    candidates.push([other, weight]);
+    total += weight;
+  }
+
+  if (candidates.length === 0 || Math.random() < REST_CHANCE) {
+    instance.focus = null;
+    instance.focusUntil = now + randBetween(REST_HOLD_MS);
+  } else {
+    let pick = Math.random() * total;
+    let chosen = candidates[0][0];
+    for (const [other, weight] of candidates) {
+      pick -= weight;
+      chosen = other;
+      if (pick <= 0) break;
+    }
+    instance.focus = chosen;
+    instance.focusUntil = now + randBetween(FOCUS_HOLD_MS);
+
+    if (chosen.focus !== instance && !chosen.lookAt?.current && Math.random() < RECIPROCATE_CHANCE) {
+      chosen.focus = instance;
+      chosen.focusUntil = instance.focusUntil + randBetween([-400, 600]);
+    }
+  }
+
+  if (instance.focus !== previous && Math.random() < BLINK_ON_SWITCH_CHANCE) startBlink(instance);
+}
+
+function resolve(target: LookTarget): LookPoint | null {
+  if (!(target instanceof Element)) return target;
+  const other = bySvg.get(target);
+  if (other) return other.measured ? other : null;
+  const box = target.getBoundingClientRect();
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+function targetFor(instance: Instance, now: number): LookPoint | null {
+  const steered = instance.lookAt?.current;
+  if (steered) return resolve(steered);
+
+  if (now - pointerAt < SOCIAL_AFTER_MS + instance.socialDelay) {
+    return { x: pointerX, y: pointerY };
+  }
+
+  if (now >= instance.focusUntil || (instance.focus && !instances.has(instance.focus))) {
+    chooseFocus(instance, now);
+  }
+  return instance.focus?.measured ? instance.focus : null;
+}
+
+function aim(instance: Instance, target: LookPoint | null, dt: number): void {
+  let yaw = instance.yaw;
+  let pitch = instance.pitch;
+  let mix = 0;
+
+  if (target && instance.measured) {
+    const dx = target.x - instance.x;
+    const dy = target.y - instance.y;
+    const distance = Math.hypot(dx, dy);
+    const reach = Math.max(REACH_PX[0], Math.min(instance.size * REACH_PER_SIZE, REACH_PX[1]));
+    // A target right on top of the bot is the viewer: it looks straight out.
+    const unit = distance > 1e-3 ? smoothstep(Math.min(distance / reach, 1)) / distance : 0;
+    yaw = dx * unit * YAW_MAX;
+    pitch = LOOK_PITCH - dy * unit * PITCH_MAX;
+    mix = 1;
+  }
+
+  const turn = 1 - Math.exp(-dt / instance.turnTau);
+  instance.yaw += (yaw - instance.yaw) * turn;
+  instance.pitch += (pitch - instance.pitch) * turn;
+  instance.mix += (mix - instance.mix) * (1 - Math.exp(-dt / MIX_TAU_MS));
+}
+
+function write(instance: Instance, now: number): void {
+  // Slow wandering on incommensurate periods, quieter while looking at something.
+  const t = now / 1000 + instance.phase;
+  const wander = 1 - 0.7 * instance.mix;
+  const mix = instance.mix;
+  const gaze = {
+    yaw:
+      REST_GAZE.yaw + (instance.yaw - REST_GAZE.yaw) * mix +
+      (Math.sin(t * 0.56) * 4.2 + Math.sin(t * 1.7 + 1.3) * 1.3) * wander,
+    pitch:
+      REST_GAZE.pitch + (instance.pitch - REST_GAZE.pitch) * mix +
+      (Math.sin(t * 0.69 + 2.1) * 3.2 + Math.sin(t * 1.46 + 0.7) * 1) * wander,
+    roll: REST_GAZE.roll + Math.sin(t * 0.46 + 3.2) * 2,
+  };
+
+  const frames = eyeFrames(instance.profile, gaze, lidFor(instance.blinkT), instance.scale);
+  for (let i = 0; i < 2; i += 1) {
+    instance.eyes[i].setAttribute('transform', frames[i].transform);
+    instance.eyes[i].setAttribute('opacity', frames[i].opacity.toFixed(3));
+  }
+}
+
+function step(now: number): void {
+  rafId = requestAnimationFrame(step);
+
+  const dt = Math.min(now - lastNow, 100);
+  lastNow = now;
+
+  rectAge += dt;
+  const refresh = rectAge >= RECT_REFRESH_MS;
+  if (refresh) rectAge = 0;
+
+  // Every read before any write, so layout is flushed at most once a frame.
+  for (const instance of instances) {
+    if (refresh || instance.live || !instance.measured) measure(instance);
+  }
+
+  for (const instance of instances) {
+    advanceBlink(instance, dt);
+    aim(instance, targetFor(instance, now), dt);
+    write(instance, now);
+  }
+}
+
 function onPointerMove(event: PointerEvent): void {
-  cursorX = event.clientX;
-  cursorY = event.clientY;
-  cursorSeen = true;
+  // A lifted finger would leave every bot staring at the last spot touched.
+  if (event.pointerType === 'touch') return;
+  pointerX = event.clientX;
+  pointerY = event.clientY;
+  pointerAt = performance.now();
+}
+
+function onPointerLeave(): void {
+  pointerAt = Number.NEGATIVE_INFINITY;
 }
 
 function invalidateRects(): void {
@@ -137,6 +313,7 @@ function startListening(): void {
   if (listening) return;
   listening = true;
   window.addEventListener('pointermove', onPointerMove, { passive: true });
+  document.documentElement.addEventListener('mouseleave', onPointerLeave);
   window.addEventListener('scroll', invalidateRects, { passive: true, capture: true });
   window.addEventListener('resize', invalidateRects);
 }
@@ -145,115 +322,57 @@ function stopListening(): void {
   if (!listening) return;
   listening = false;
   window.removeEventListener('pointermove', onPointerMove);
+  document.documentElement.removeEventListener('mouseleave', onPointerLeave);
   window.removeEventListener('scroll', invalidateRects, { capture: true });
   window.removeEventListener('resize', invalidateRects);
 }
 
-function step(now: number): void {
-  rafId = requestAnimationFrame(step);
-
-  const dt = Math.min(now - lastNow, 100);
-  lastNow = now;
-
-  if (cursorSeen) introT = Math.min(1, introT + dt / LOOK_INTRO_MS);
-  const introW = easeInOutCubic(introT);
-
-  const blend = 1 - Math.exp(-dt / BLEND_TAU_MS);
-
-  rectAge += dt;
-  const refresh = rectAge >= RECT_REFRESH_MS;
-  if (refresh) rectAge = 0;
-
-  for (const instance of instances) {
-    if (refresh || !instance.measured) measure(instance);
-
-    if (instance.blinkT >= 0) {
-      instance.blinkT += dt;
-      if (instance.blinkT >= BLINK_CLOSE_MS + BLINK_OPEN_MS) {
-        instance.blinkT = -1;
-        instance.nextBlink = randBetween(BLINK_INTERVAL[0], BLINK_INTERVAL[1]);
-      }
-    } else {
-      instance.nextBlink -= dt;
-      if (instance.nextBlink <= 0) instance.blinkT = 0;
-    }
-
-    const idleX = Math.sin(now * 0.00165 + instance.idlePhase) * IDLE_X;
-    const idleY = Math.cos(now * 0.00122 + instance.idlePhase * 1.3) * IDLE_Y;
-
-    let targetX = idleX;
-    let targetY = idleY;
-
-    if (cursorSeen && instance.measured) {
-      const k = 1 - Math.exp(-dt / instance.tau);
-      if (!instance.tracking) {
-        instance.cursorX = cursorX;
-        instance.cursorY = cursorY;
-        instance.tracking = true;
-      }
-      instance.cursorX += (cursorX - instance.cursorX) * k;
-      instance.cursorY += (cursorY - instance.cursorY) * k;
-
-      const dx = instance.cursorX - instance.screenX;
-      const dy = instance.cursorY - instance.screenY;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 1e-3) {
-        // Eases to centre when the cursor is on the eye, saturates beyond reach.
-        const mag = smoothstep(Math.min(dist / LOOK_REACH_PX, 1)) * LOOK_MAX_MAG * introW;
-        const gain = 1 + 0.22 * mag;
-        const unit = mag / dist;
-        targetX += dx * unit * LOOK_X * gain;
-        targetY += dy * unit * LOOK_Y * gain;
-      }
-    }
-
-    instance.offX += (targetX - instance.offX) * blend;
-    instance.offY += (targetY - instance.offY) * blend;
-
-    const scaleY = blinkScaleY(instance.blinkT);
-    instance.eyes.setAttribute(
-      'transform',
-      `translate(${instance.offX.toFixed(3)} ${instance.offY.toFixed(3)}) ` +
-        `translate(${instance.cx} ${instance.cy}) scale(1 ${scaleY.toFixed(4)}) ` +
-        `translate(${-instance.cx} ${-instance.cy})`,
-    );
-  }
+export interface EyesOptions {
+  /** The two eye paths, already shaped by `eyePath` and centred on the origin. */
+  eyes: [SVGGraphicsElement, SVGGraphicsElement];
+  profile: Profile;
+  /** Body radius in viewBox units. */
+  scale: number;
+  lookAt?: LookSource;
+  /** Remeasure every frame, for avatars that move on their own. */
+  live?: boolean;
 }
 
 /**
  * Starts animating one avatar's eyes. Returns the teardown, so a caller can
  * hand it straight back from an effect.
  */
-export function registerEyes(
-  eyes: SVGGraphicsElement,
-  cx: number,
-  cy: number,
-): () => void {
-  if (prefersReducedMotion()) return () => {};
+export function registerEyes({ eyes, profile, scale, lookAt, live = false }: EyesOptions): () => void {
+  const svg = eyes[0].ownerSVGElement;
+  if (prefersReducedMotion() || !svg) return () => {};
 
   const instance: Instance = {
     eyes,
-    svg: eyes.ownerSVGElement!,
-    cx,
-    cy,
-    screenX: 0,
-    screenY: 0,
+    svg,
+    profile,
+    scale,
+    lookAt: lookAt ?? null,
+    live,
+    x: 0,
+    y: 0,
+    size: 0,
     measured: false,
-    // Each eye lags by a slightly different amount, so a grid of bots does not
-    // move as one object.
-    tau: randBetween(LOOK_SMOOTH_MIN_MS, LOOK_SMOOTH_MAX_MS),
-    cursorX: 0,
-    cursorY: 0,
-    tracking: false,
-    offX: 0,
-    offY: 0,
+    turnTau: randBetween(TURN_TAU_MS),
+    yaw: REST_GAZE.yaw,
+    pitch: REST_GAZE.pitch,
+    mix: 0,
     blinkT: -1,
     // Staggered so they do not all blink together on first paint.
-    nextBlink: randBetween(0, 3000) + randBetween(BLINK_INTERVAL[0], BLINK_INTERVAL[1]) * 0.25,
-    idlePhase: Math.random() * Math.PI * 2,
+    nextBlink: Math.random() * 3_000 + randBetween(BLINK_INTERVAL_MS) * 0.25,
+    doubleBlink: false,
+    phase: Math.random() * 100,
+    socialDelay: Math.random() * SOCIAL_STAGGER_MS,
+    focus: null,
+    focusUntil: 0,
   };
 
   instances.add(instance);
+  bySvg.set(svg, instance);
   startListening();
   if (!rafId) {
     lastNow = performance.now();
@@ -262,7 +381,12 @@ export function registerEyes(
 
   return () => {
     instances.delete(instance);
-    eyes.removeAttribute('transform');
+    if (bySvg.get(svg) === instance) bySvg.delete(svg);
+    const rest = eyeFrames(profile, REST_GAZE, 1, scale);
+    eyes.forEach((eye, i) => {
+      eye.setAttribute('transform', rest[i].transform);
+      eye.setAttribute('opacity', String(rest[i].opacity));
+    });
     if (instances.size === 0) {
       cancelAnimationFrame(rafId);
       rafId = 0;
